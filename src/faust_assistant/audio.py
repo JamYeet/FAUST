@@ -32,6 +32,8 @@ PRE_ROLL_CHUNKS = math.ceil(PRE_ROLL_MS / (CHUNK / SAMPLE_RATE * 1000)) # 10
 MIN_SPEECH_S = 0.2
 NO_SPEECH_THRESHOLD = 0.6
 MIN_TOTAL_S = PRE_ROLL_CHUNKS * CHUNK / SAMPLE_RATE + MIN_SPEECH_S 
+INITIAL_PROMPT = "Hey Faust, what's the time?"
+
 
 audio_q = queue.Queue()
 
@@ -49,7 +51,7 @@ def load_whisper():
 def transcribe(model, audio):
     
 
-    segments, info = model.transcribe(audio, language="en")
+    segments, info = model.transcribe(audio, language="en", initial_prompt=INITIAL_PROMPT)
     joined = ""
     for s in segments:
         if s.no_speech_prob < NO_SPEECH_THRESHOLD:
