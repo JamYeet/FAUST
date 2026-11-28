@@ -18,16 +18,24 @@ import numpy as np
 import sounddevice as sd
 import torch
 import math
+import time
 
 from silero_vad import load_silero_vad, VADIterator
 from faster_whisper import WhisperModel
 from collections import deque
 
 
+# Constants
 SAMPLE_RATE = 16000   # Silero VAD expects 16 kHz audio
 CHUNK = 512           # Silero needs exactly 512 samples per chunk (~32 ms)
 PRE_ROLL_MS = 300
 PRE_ROLL_CHUNKS = math.ceil(PRE_ROLL_MS / (CHUNK / SAMPLE_RATE * 1000)) # 10
+MIN_SPEECH_S = 0.2
+NO_SPEECH_THRESHOLD = 0.6
+MIN_TOTAL_S = PRE_ROLL_CHUNKS * CHUNK / SAMPLE_RATE + MIN_SPEECH_S 
+INITIAL_PROMPT = "Hey Faust, what's the time?"
+MODEL_SIZE = "small" 
+
 
 audio_q = queue.Queue()
 
@@ -36,18 +44,19 @@ def callback(indata, frames, time, status):
     audio_q.put(indata[:, 0].copy()) 
 
 def load_whisper():
-    model_size = "small"
-    
-    model = WhisperModel(model_size, device="cuda", compute_type="float16")
-
+    print(f"Loading Whisper model: {MODEL_SIZE}")
+    model = WhisperModel(MODEL_SIZE, device="cuda", compute_type="float16")
     return model
+
 
 def transcribe(model, audio):
     
-    segments, info = model.transcribe(audio, language="en")
+
+    segments, info = model.transcribe(audio, language="en", initial_prompt=INITIAL_PROMPT)
     joined = ""
     for s in segments:
-        joined += s.text 
+        if s.no_speech_prob < NO_SPEECH_THRESHOLD:
+            joined += s.text 
     return joined.strip()             
     
 
@@ -69,18 +78,35 @@ def main():
 
             if result and 'start' in result: # On start
                 speaking = True
-                chunks = [list(pre_roll)]          
+                chunks = list(pre_roll)       
                 print("Speech started") 
 
             if speaking: # If speaking
                 chunks.append(chunk) 
+            else:
+                pre_roll.append(chunk)
 
             if result and 'end' in result: # On end
                 speaking = False
-                audio = np.concatenate(chunks)
-                text = transcribe(whisper_model, audio)
-                print(f"You said: {text}")
                 pre_roll.clear()
+                
+
+                audio = np.concatenate(chunks)
+                audio_length = len(audio) / SAMPLE_RATE
+                
+                if audio_length < MIN_TOTAL_S:
+                    print("Ignored", round(audio_length, 2), "s length clip")
+                    continue
+                
+                start = time.perf_counter()
+                text = transcribe(whisper_model, audio)
+                elapsed = time.perf_counter() - start
+
+                if not text:
+                    print(f"No speech detected ({elapsed:.2f} s)")
+                else:
+                    print(f"You said: {text} ({elapsed:.2f} s)")
+
 
 if __name__ == "__main__":
     main()
