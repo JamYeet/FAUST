@@ -17,12 +17,17 @@ import queue
 import numpy as np
 import sounddevice as sd
 import torch
+import math
 
 from silero_vad import load_silero_vad, VADIterator
 from faster_whisper import WhisperModel
+from collections import deque
+
 
 SAMPLE_RATE = 16000   # Silero VAD expects 16 kHz audio
 CHUNK = 512           # Silero needs exactly 512 samples per chunk (~32 ms)
+PRE_ROLL_MS = 300
+PRE_ROLL_CHUNKS = math.ceil(PRE_ROLL_MS / (CHUNK / SAMPLE_RATE * 1000)) # 10
 
 audio_q = queue.Queue()
 
@@ -52,7 +57,9 @@ def main():
     whisper_model = load_whisper()
 
     speaking = False                  
-    chunks = []                     
+    chunks = []  
+    pre_roll = deque(maxlen=PRE_ROLL_CHUNKS)
+                       
     with sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="float32",
                         blocksize=CHUNK, callback=callback):
         print("Listening... (Ctrl+C to stop)")
@@ -60,19 +67,20 @@ def main():
             chunk = audio_q.get()
             result = vad(torch.from_numpy(chunk))
 
-            if result and 'start' in result:
+            if result and 'start' in result: # On start
                 speaking = True
-                chunks = []          
-                print("Speech started")
+                chunks = [list(pre_roll)]          
+                print("Speech started") 
 
-            if speaking:
+            if speaking: # If speaking
                 chunks.append(chunk) 
 
-            if result and 'end' in result:
+            if result and 'end' in result: # On end
                 speaking = False
                 audio = np.concatenate(chunks)
                 text = transcribe(whisper_model, audio)
                 print(f"You said: {text}")
+                pre_roll.clear()
 
 if __name__ == "__main__":
     main()
