@@ -18,6 +18,7 @@ import numpy as np
 import sounddevice as sd
 import torch
 import math
+import time
 
 from silero_vad import load_silero_vad, VADIterator
 from faster_whisper import WhisperModel
@@ -33,6 +34,7 @@ MIN_SPEECH_S = 0.2
 NO_SPEECH_THRESHOLD = 0.6
 MIN_TOTAL_S = PRE_ROLL_CHUNKS * CHUNK / SAMPLE_RATE + MIN_SPEECH_S 
 INITIAL_PROMPT = "Hey Faust, what's the time?"
+MODEL_SIZE = "small" 
 
 
 audio_q = queue.Queue()
@@ -42,11 +44,10 @@ def callback(indata, frames, time, status):
     audio_q.put(indata[:, 0].copy()) 
 
 def load_whisper():
-    model_size = "small"
-    
-    model = WhisperModel(model_size, device="cuda", compute_type="float16")
-
+    print(f"Loading Whisper model: {MODEL_SIZE}")
+    model = WhisperModel(MODEL_SIZE, device="cuda", compute_type="float16")
     return model
+
 
 def transcribe(model, audio):
     
@@ -97,11 +98,14 @@ def main():
                     print("Ignored", round(audio_length, 2), "s length clip")
                     continue
                 
+                start = time.perf_counter()
                 text = transcribe(whisper_model, audio)
+                elapsed = time.perf_counter() - start
+
                 if not text:
-                    print("No speech detected")
+                    print(f"No speech detected ({elapsed:.2f} s)")
                 else:
-                    print(f"You said: {text}")
+                    print(f"You said: {text} ({elapsed:.2f} s)")
 
 
 if __name__ == "__main__":
